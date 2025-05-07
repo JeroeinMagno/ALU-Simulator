@@ -3,7 +3,8 @@ public class ALULogic {
     private String binaryResult;
     private java.beans.PropertyChangeSupport changes;
 
-    private String[] recentCalculations = new String[10];
+    private static final int MAX_HISTORY_ENTRIES = 10;
+    private String[] recentCalculations = new String[MAX_HISTORY_ENTRIES];
     private int historyIndex = 0;
 
     public ALULogic() {
@@ -116,12 +117,18 @@ public class ALULogic {
     }
 
     // Input validation
-    public boolean isValidInput(String input) {
+    public boolean isValidInput(String input, String base) {
         if (input == null || input.trim().isEmpty()) {
             return false;
         }
         try {
-            Integer.parseInt(input);
+            if ("Binary".equals(base)) {
+                Integer.parseInt(input, 2);
+            } else if ("Hexadecimal".equals(base)) {
+                Integer.parseInt(input, 16);
+            } else { // Decimal
+                Integer.parseInt(input);
+            }
             return true;
         } catch (NumberFormatException e) {
             return false;
@@ -141,37 +148,35 @@ public class ALULogic {
             entry = formatHistoryEntry(operation, a, b, result, base, false);
         }
         recentCalculations[historyIndex] = entry;
-        historyIndex = (historyIndex + 1) % 10;
+        historyIndex = (historyIndex + 1) % MAX_HISTORY_ENTRIES;
         changes.firePropertyChange("historyUpdate", null, getHistory());
     }
 
+    private String formatNumber(int number, String base) {
+        if ("Binary".equals(base)) {
+            return Integer.toBinaryString(number);
+        } else if ("Hexadecimal".equals(base)) {
+            return String.format("0x%X", number);
+        }
+        return Integer.toString(number);
+    }
+
     private String formatHistoryEntry(String operation, int a, int b, int result, String base, boolean isUnary) {
-        if (base.equals("Binary")) {
-            if (isUnary) {
-                return String.format("%s %s = %s",
-                    Integer.toBinaryString(a),
-                    operation,
-                    Integer.toBinaryString(result));
-            }
-            return String.format("%s %s %s = %s",
-                Integer.toBinaryString(a),
+        String numAStr = formatNumber(a, base);
+        String resultStr = formatNumber(result, base);
+
+        if (isUnary) {
+            return String.format("%s %s = %s",
+                numAStr,
                 operation,
-                Integer.toBinaryString(b),
-                Integer.toBinaryString(result));
-        } else if (base.equals("Hexadecimal")) {
-            if (isUnary) {
-                return String.format("0x%X %s = 0x%X",
-                    a, operation, result);
-            }
-            return String.format("0x%X %s 0x%X = 0x%X",
-                a, operation, b, result);
+                resultStr);
         } else {
-            if (isUnary) {
-                return String.format("%d %s = %d",
-                    a, operation, result);
-            }
-            return String.format("%d %s %d = %d",
-                a, operation, b, result);
+            String numBStr = formatNumber(b, base);
+            return String.format("%s %s %s = %s",
+                numAStr,
+                operation,
+                numBStr,
+                resultStr);
         }
     }
 

@@ -5,23 +5,58 @@ import java.awt.event.*;
 import javax.swing.border.*;
 import javax.swing.Timer;
 import java.beans.PropertyChangeListener;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import src.ModernUIUtils;
 
 public class ALUInterface extends JFrame {
     private ALULogic alu;
     private JTextField input1Field, input2Field, resultField;
     private JLabel binaryInput1Label, binaryInput2Label, binaryResultLabel;
-    private JComboBox<String> operationCombo;
+    private JComboBox<OperationItem> operationCombo;
     private JButton calculateButton;
-    private Color themeColor = new Color(70, 130, 180);
-    private Color lightThemeColor = new Color(135, 206, 235);
     private JPanel historyPanel;
     private JList<String> historyList;
     private DefaultListModel<String> historyModel;
     private JComboBox<String> baseSelector;
     private JButton copyButton;
+    private Map<String, BiFunction<Integer, Integer, Integer>> binaryOperations;
+    private Map<String, Function<Integer, Integer>> unaryOperations;
+    private Timer animationTimer;
+    private static final Color VALID_INPUT_BACKGROUND = new Color(200, 255, 200);
+    private static final Color INVALID_INPUT_BACKGROUND = new Color(255, 200, 200);
+    private static final int DEFAULT_PADDING = 8;
+    private static final int COMPONENT_SPACING = 15;
+    private static final Font HISTORY_FONT = new Font("Monospace", Font.PLAIN, 12);
+    private static final Font BINARY_LABEL_FONT = new Font("Consolas", Font.PLAIN, 14);
+    private static final String DEFAULT_BINARY_STRING = "0000 0000";
+    private static final int RESULT_ANIMATION_DURATION = 400;
+
+    // Static inner class for JComboBox items
+    private static class OperationItem {
+        private final String displayString;
+        private final String operationKey;
+
+        public OperationItem(String displayString, String operationKey) {
+            this.displayString = displayString;
+            this.operationKey = operationKey;
+        }
+
+        public String getKey() {
+            return operationKey;
+        }
+
+        @Override
+        public String toString() {
+            return displayString; // This is what JComboBox will display
+        }
+    }
 
     public ALUInterface() {
         alu = new ALULogic();
+        setupOperations();
         setupGUI();
         setupModelListeners();
         setupKeyboardShortcuts();
@@ -54,14 +89,14 @@ public class ALUInterface extends JFrame {
     private void setupGUI() {
         setTitle("ALU Visual Calculator");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLayout(new BorderLayout(15, 15));
+        setLayout(new BorderLayout(COMPONENT_SPACING, COMPONENT_SPACING));
         getRootPane().setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         
         // Main content
         JPanel mainPanel = new JPanel();
         mainPanel.setLayout(new BoxLayout(mainPanel, BoxLayout.Y_AXIS));
         mainPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        mainPanel.setBackground(Color.WHITE);
+        mainPanel.setBackground(ModernUIUtils.DEFAULT_PANEL_BACKGROUND);
 
         // Input section with base selector
         setupInputSection(mainPanel);
@@ -90,10 +125,10 @@ public class ALUInterface extends JFrame {
     }
 
     private void setupInputSection(JPanel mainPanel) {
-        JPanel inputPanel = createRoundedPanel();
+        JPanel inputPanel = ModernUIUtils.createRoundedPanel();
         inputPanel.setLayout(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(8, 8, 8, 8);
+        gbc.insets = new Insets(DEFAULT_PADDING, DEFAULT_PADDING, DEFAULT_PADDING, DEFAULT_PADDING);
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
         // Number base selector
@@ -104,7 +139,7 @@ public class ALUInterface extends JFrame {
         gbc.gridwidth = 1;
         
         // Input 1
-        input1Field = createModernTextField();
+        input1Field = ModernUIUtils.createModernTextField();
         input1Field.setToolTipText("Enter first number");
         setupInputField(inputPanel, gbc, "Input 1:", input1Field, 1);
         
@@ -113,7 +148,7 @@ public class ALUInterface extends JFrame {
         setupBinaryLabel(inputPanel, gbc, binaryInput1Label, 2);
         
         // Input 2
-        input2Field = createModernTextField();
+        input2Field = ModernUIUtils.createModernTextField();
         input2Field.setToolTipText("Enter second number");
         setupInputField(inputPanel, gbc, "Input 2:", input2Field, 3);
         
@@ -122,49 +157,56 @@ public class ALUInterface extends JFrame {
         setupBinaryLabel(inputPanel, gbc, binaryInput2Label, 4);
         
         mainPanel.add(inputPanel);
-        mainPanel.add(Box.createRigidArea(new Dimension(0, 15)));
+        mainPanel.add(Box.createRigidArea(new Dimension(0, COMPONENT_SPACING)));
     }
 
     private void setupOperationSection(JPanel mainPanel) {
-        JPanel operationPanel = createRoundedPanel();
+        JPanel operationPanel = ModernUIUtils.createRoundedPanel();
         operationPanel.setLayout(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(8, 8, 8, 8);
+        gbc.insets = new Insets(DEFAULT_PADDING, DEFAULT_PADDING, DEFAULT_PADDING, DEFAULT_PADDING);
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
-        operationCombo = createModernComboBox();
-        operationCombo.setModel(new DefaultComboBoxModel<>(new String[]{
-            "ADD (Alt+A)", "SUBTRACT (Alt+S)", "MULTIPLY (Alt+M)", 
-            "DIVIDE (Alt+D)", "MODULO (Alt+R)", "LEFT SHIFT (Alt+L)", 
-            "RIGHT SHIFT (Alt+H)", "AND", "OR", "NOT"
-        }));
+        // Define OperationItem array for the JComboBox
+        OperationItem[] operationItems = new OperationItem[]{
+            new OperationItem("ADD (Alt+A)", "ADD"),
+            new OperationItem("SUBTRACT (Alt+S)", "SUBTRACT"),
+            new OperationItem("MULTIPLY (Alt+M)", "MULTIPLY"),
+            new OperationItem("DIVIDE (Alt+D)", "DIVIDE"),
+            new OperationItem("MODULO (Alt+R)", "MODULO"),
+            new OperationItem("LEFT SHIFT (Alt+L)", "LEFT"),     // Key "LEFT" for "LEFT SHIFT"
+            new OperationItem("RIGHT SHIFT (Alt+H)", "RIGHT"),   // Key "RIGHT" for "RIGHT SHIFT"
+            new OperationItem("AND", "AND"),
+            new OperationItem("OR", "OR"),
+            new OperationItem("NOT", "NOT")
+        };
+        operationCombo = ModernUIUtils.createModernComboBox(operationItems);
         operationCombo.setToolTipText("Select operation to perform");
         gbc.gridx = 0; gbc.gridy = 0;
         operationPanel.add(operationCombo, gbc);
 
         // Calculate button with hover effect
-        calculateButton = createModernButton("Calculate");
+        calculateButton = ModernUIUtils.createModernButton("Calculate");
         calculateButton.addActionListener(e -> performOperation());
-        calculateButton.addMouseListener(new HoverEffect(calculateButton));
         gbc.gridy = 1;
         operationPanel.add(calculateButton, gbc);
 
         mainPanel.add(operationPanel);
-        mainPanel.add(Box.createRigidArea(new Dimension(0, 15)));
+        mainPanel.add(Box.createRigidArea(new Dimension(0, COMPONENT_SPACING)));
     }
 
     private void setupResultSection(JPanel mainPanel) {
-        JPanel resultPanel = createRoundedPanel();
+        JPanel resultPanel = ModernUIUtils.createRoundedPanel();
         resultPanel.setLayout(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(8, 8, 8, 8);
+        gbc.insets = new Insets(DEFAULT_PADDING, DEFAULT_PADDING, DEFAULT_PADDING, DEFAULT_PADDING);
         gbc.fill = GridBagConstraints.HORIZONTAL;
 
-        resultField = createModernTextField();
+        resultField = ModernUIUtils.createModernTextField();
         resultField.setEditable(false);
         resultField.setToolTipText("Operation result");
         
-        copyButton = createModernButton("Copy Result");
+        copyButton = ModernUIUtils.createModernButton("Copy Result");
         copyButton.setToolTipText("Copy result to clipboard (Alt+C)");
         copyButton.addActionListener(e -> copyResultToClipboard());
 
@@ -185,13 +227,13 @@ public class ALUInterface extends JFrame {
     }
 
     private void setupHistoryPanel(JPanel mainPanel) {
-        historyPanel = createRoundedPanel();
+        historyPanel = ModernUIUtils.createRoundedPanel();
         historyPanel.setLayout(new BorderLayout());
         historyPanel.setBorder(BorderFactory.createTitledBorder("Calculation History"));
 
         historyModel = new DefaultListModel<>();
         historyList = new JList<>(historyModel);
-        historyList.setFont(new Font("Monospace", Font.PLAIN, 12));
+        historyList.setFont(HISTORY_FONT);
         
         JScrollPane historyScroll = new JScrollPane(historyList);
         historyScroll.setPreferredSize(new Dimension(0, 150));
@@ -218,14 +260,16 @@ public class ALUInterface extends JFrame {
         InputMap inputMap = getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
         ActionMap actionMap = getRootPane().getActionMap();
 
-        // Operation shortcuts
-        setupShortcut(inputMap, actionMap, "ADD", KeyStroke.getKeyStroke(KeyEvent.VK_A, InputEvent.ALT_DOWN_MASK), 0);
-        setupShortcut(inputMap, actionMap, "SUBTRACT", KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.ALT_DOWN_MASK), 1);
-        setupShortcut(inputMap, actionMap, "MULTIPLY", KeyStroke.getKeyStroke(KeyEvent.VK_M, InputEvent.ALT_DOWN_MASK), 2);
-        setupShortcut(inputMap, actionMap, "DIVIDE", KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.ALT_DOWN_MASK), 3);
-        setupShortcut(inputMap, actionMap, "MODULO", KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.ALT_DOWN_MASK), 4);
-        setupShortcut(inputMap, actionMap, "LEFT_SHIFT", KeyStroke.getKeyStroke(KeyEvent.VK_L, InputEvent.ALT_DOWN_MASK), 5);
-        setupShortcut(inputMap, actionMap, "RIGHT_SHIFT", KeyStroke.getKeyStroke(KeyEvent.VK_H, InputEvent.ALT_DOWN_MASK), 6);
+        // Operation shortcuts - pass operation key instead of index
+        // The key passed here (e.g., "ADD", "SUBTRACT") must match the keys in OperationItem instances
+        setupShortcut(inputMap, actionMap, "ADD", KeyStroke.getKeyStroke(KeyEvent.VK_A, InputEvent.ALT_DOWN_MASK));
+        setupShortcut(inputMap, actionMap, "SUBTRACT", KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.ALT_DOWN_MASK));
+        setupShortcut(inputMap, actionMap, "MULTIPLY", KeyStroke.getKeyStroke(KeyEvent.VK_M, InputEvent.ALT_DOWN_MASK));
+        setupShortcut(inputMap, actionMap, "DIVIDE", KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.ALT_DOWN_MASK));
+        setupShortcut(inputMap, actionMap, "MODULO", KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.ALT_DOWN_MASK));
+        // For LEFT and RIGHT, ensure the key matches what's in OperationItem (e.g., "LEFT", "RIGHT")
+        setupShortcut(inputMap, actionMap, "LEFT", KeyStroke.getKeyStroke(KeyEvent.VK_L, InputEvent.ALT_DOWN_MASK));
+        setupShortcut(inputMap, actionMap, "RIGHT", KeyStroke.getKeyStroke(KeyEvent.VK_H, InputEvent.ALT_DOWN_MASK));
 
         // Copy result shortcut
         inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.ALT_DOWN_MASK), "COPY");
@@ -237,12 +281,19 @@ public class ALUInterface extends JFrame {
         });
     }
 
-    private void setupShortcut(InputMap inputMap, ActionMap actionMap, String key, KeyStroke keystroke, int operationIndex) {
-        inputMap.put(keystroke, key);
-        actionMap.put(key, new AbstractAction() {
+    private void setupShortcut(InputMap inputMap, ActionMap actionMap, String operationKey, KeyStroke keystroke) {
+        inputMap.put(keystroke, operationKey); // Use operationKey for the action map key as well
+        actionMap.put(operationKey, new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                operationCombo.setSelectedIndex(operationIndex);
+                ComboBoxModel<OperationItem> model = operationCombo.getModel();
+                for (int i = 0; i < model.getSize(); i++) {
+                    OperationItem item = model.getElementAt(i);
+                    if (item.getKey().equals(operationKey)) {
+                        operationCombo.setSelectedIndex(i);
+                        break;
+                    }
+                }
                 performOperation();
             }
         });
@@ -253,71 +304,6 @@ public class ALUInterface extends JFrame {
         StringSelection selection = new StringSelection(resultField.getText());
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(selection, selection);
         JOptionPane.showMessageDialog(this, "Result copied to clipboard!", "Success", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    // Modern UI component creators
-    private JPanel createRoundedPanel() {
-        JPanel panel = new JPanel() {
-            @Override
-            protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(getBackground());
-                g2.fillRoundRect(0, 0, getWidth()-1, getHeight()-1, 15, 15);
-                g2.dispose();
-            }
-        };
-        panel.setOpaque(false);
-        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        panel.setBackground(Color.WHITE);
-        return panel;
-    }
-
-    private JTextField createModernTextField() {
-        JTextField field = new JTextField(15);
-        field.setBorder(BorderFactory.createCompoundBorder(
-            new RoundedBorder(8, themeColor),
-            BorderFactory.createEmptyBorder(8, 12, 8, 12)
-        ));
-        field.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        return field;
-    }
-
-    private JButton createModernButton(String text) {
-        JButton button = new JButton(text) {
-            @Override
-            protected void paintComponent(Graphics g) {
-                Graphics2D g2 = (Graphics2D) g.create();
-                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                g2.setColor(getBackground());
-                g2.fillRoundRect(0, 0, getWidth()-1, getHeight()-1, 15, 15);
-                g2.setColor(getForeground());
-                FontMetrics fm = g2.getFontMetrics();
-                int x = (getWidth() - fm.stringWidth(getText())) / 2;
-                int y = ((getHeight() - fm.getHeight()) / 2) + fm.getAscent();
-                g2.drawString(getText(), x, y);
-                g2.dispose();
-            }
-        };
-        button.setOpaque(false);
-        button.setContentAreaFilled(false);
-        button.setBorderPainted(false);
-        button.setBackground(themeColor);
-        button.setForeground(Color.WHITE);
-        button.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        button.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        return button;
-    }
-
-    private JComboBox<String> createModernComboBox() {
-        JComboBox<String> combo = new JComboBox<>(new String[] {
-            "ADD", "SUBTRACT", "AND", "OR", "NOT"
-        });
-        combo.setRenderer(new ModernComboBoxRenderer());
-        combo.setBackground(Color.WHITE);
-        combo.setForeground(themeColor);
-        combo.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        return combo;
     }
 
     private void setupInputField(JPanel panel, GridBagConstraints gbc, String label, JTextField field, int row) {
@@ -341,8 +327,8 @@ public class ALUInterface extends JFrame {
     }
 
     private JLabel createBinaryLabel() {
-        JLabel label = new JLabel("0000 0000");
-        label.setFont(new Font("Consolas", Font.PLAIN, 14));
+        JLabel label = new JLabel(DEFAULT_BINARY_STRING);
+        label.setFont(BINARY_LABEL_FONT);
         label.setForeground(Color.DARK_GRAY);
         return label;
     }
@@ -353,11 +339,11 @@ public class ALUInterface extends JFrame {
                 if (field.getText().isEmpty()) {
                     field.setBackground(Color.WHITE);
                     field.setToolTipText("Enter a number");
-                } else if (!alu.isValidInput(field.getText())) {
-                    field.setBackground(new Color(255, 200, 200));
-                    field.setToolTipText("Please enter a valid integer");
+                } else if (!alu.isValidInput(field.getText(), (String) baseSelector.getSelectedItem())) {
+                    field.setBackground(INVALID_INPUT_BACKGROUND);
+                    field.setToolTipText("Please enter a valid integer for the selected base");
                 } else {
-                    field.setBackground(new Color(200, 255, 200));
+                    field.setBackground(VALID_INPUT_BACKGROUND);
                     field.setToolTipText("Valid input");
                     updateBinaryLabel(field);
                 }
@@ -373,89 +359,100 @@ public class ALUInterface extends JFrame {
     }
 
     private void updateBinaryLabel(JTextField field) {
+        String inputText = field.getText();
+        if (inputText.isEmpty()) { // Handle empty case directly if necessary
+            setBinaryLabelText(field, DEFAULT_BINARY_STRING);
+            return;
+        }
         try {
-            int value = Integer.parseInt(field.getText());
+            // Use parseInputNumber to respect the selected base
+            int value = parseInputNumber(inputText); // parseInputNumber already uses baseSelector
             String binary = String.format("%32s", Integer.toBinaryString(value))
                                .replace(' ', '0')
                                .replaceAll("(.{8})", "$1 ")
                                .trim();
-            if (field == input1Field) {
-                binaryInput1Label.setText(binary);
-            } else if (field == input2Field) {
-                binaryInput2Label.setText(binary);
-            }
+            setBinaryLabelText(field, binary);
         } catch (NumberFormatException ex) {
-            // Invalid number - binary label will be handled by validation
+            // If parseInputNumber fails, the input is invalid for the current base
+            setBinaryLabelText(field, "Invalid Input");
         }
+    }
+
+    // Helper to avoid duplicating if/else for input1Field/input2Field
+    private void setBinaryLabelText(JTextField field, String text) {
+        if (field == input1Field) {
+            binaryInput1Label.setText(text);
+        } else if (field == input2Field) {
+            binaryInput2Label.setText(text);
+        }
+    }
+
+    private void setupOperations() {
+        binaryOperations = new HashMap<>();
+        binaryOperations.put("ADD", (n1, n2) -> alu.add(n1, n2));
+        binaryOperations.put("SUBTRACT", (n1, n2) -> alu.subtract(n1, n2));
+        binaryOperations.put("MULTIPLY", (n1, n2) -> alu.multiply(n1, n2));
+        binaryOperations.put("DIVIDE", (n1, n2) -> alu.divide(n1, n2));
+        binaryOperations.put("MODULO", (n1, n2) -> alu.modulo(n1, n2));
+        binaryOperations.put("LEFT", (n1, n2) -> alu.leftShift(n1, n2));
+        binaryOperations.put("RIGHT", (n1, n2) -> alu.rightShift(n1, n2));
+        binaryOperations.put("AND", (n1, n2) -> alu.and(n1, n2));
+        binaryOperations.put("OR", (n1, n2) -> alu.or(n1, n2));
+
+        unaryOperations = new HashMap<>();
+        unaryOperations.put("NOT", (n1) -> alu.not(n1));
     }
 
     private void performOperation() {
         try {
-            String input1 = input1Field.getText();
-            String input2 = input2Field.getText();
+            String input1Text = input1Field.getText();
+            String input2Text = input2Field.getText();
             String base = (String) baseSelector.getSelectedItem();
             
-            if (!alu.isValidInput(input1)) {
-                showError("Please enter a valid number for Input 1");
+            if (!alu.isValidInput(input1Text, base)) {
+                showError("Please enter a valid number for Input 1 for the selected base (" + base + ")");
                 input1Field.requestFocus();
                 return;
             }
 
-            int num1 = parseInputNumber(input1);
-            String op = (String) operationCombo.getSelectedItem();
-            int result;
+            int num1 = parseInputNumber(input1Text);
+            // Get OperationItem and then its key
+            OperationItem selectedItem = (OperationItem) operationCombo.getSelectedItem();
+            if (selectedItem == null) {
+                showError("No operation selected.");
+                return;
+            }
+            String operationKey = selectedItem.getKey();
 
-            if (op.contains("NOT")) {
-                result = alu.not(num1);
-                alu.addToHistory("NOT", num1, 0, result, base);
-            } else {
-                if (!alu.isValidInput(input2)) {
-                    showError("Please enter a valid number for Input 2");
+            int operationOutcome;
+
+            if (unaryOperations.containsKey(operationKey)) {
+                Function<Integer, Integer> operation = unaryOperations.get(operationKey);
+                operationOutcome = operation.apply(num1);
+                alu.addToHistory(operationKey, num1, 0, operationOutcome, base);
+            } else if (binaryOperations.containsKey(operationKey)) {
+                if (!alu.isValidInput(input2Text, base)) {
+                    showError("Please enter a valid number for Input 2 for the selected base (" + base + ")");
                     input2Field.requestFocus();
                     return;
                 }
-                int num2 = parseInputNumber(input2);
-
-                if (op.contains("ADD")) {
-                    result = alu.add(num1, num2);
-                } else if (op.contains("SUBTRACT")) {
-                    result = alu.subtract(num1, num2);
-                } else if (op.contains("MULTIPLY")) {
-                    result = alu.multiply(num1, num2);
-                } else if (op.contains("DIVIDE")) {
-                    result = alu.divide(num1, num2);
-                } else if (op.contains("MODULO")) {
-                    result = alu.modulo(num1, num2);
-                } else if (op.contains("LEFT SHIFT")) {
-                    result = alu.leftShift(num1, num2);
-                } else if (op.contains("RIGHT SHIFT")) {
-                    result = alu.rightShift(num1, num2);
-                } else if (op.contains("AND")) {
-                    result = alu.and(num1, num2);
-                } else if (op.contains("OR")) {
-                    result = alu.or(num1, num2);
-                } else {
-                    showError("Invalid operation");
-                    return;
-                }
-                String operation = op.split(" ")[0];
-                alu.addToHistory(operation, num1, num2, result, base);
+                int num2 = parseInputNumber(input2Text);
+                BiFunction<Integer, Integer, Integer> operation = binaryOperations.get(operationKey);
+                operationOutcome = operation.apply(num1, num2);
+                alu.addToHistory(operationKey, num1, num2, operationOutcome, base);
+            } else {
+                showError("Invalid operation selected: " + selectedItem.displayString + " (Key: " + operationKey + ")");
+                return;
             }
             
-            displayResult(result);
+            displayResult(operationOutcome);
             
         } catch (ArithmeticException e) {
             showError("Arithmetic error: " + e.getMessage());
+        } catch (NumberFormatException e) {
+            showError("Invalid number format for operation: " + e.getMessage());
         } catch (Exception e) {
-            showError("Error: " + e.getMessage());
-        }
-    }
-
-    private void updateHistory(String operation, int a, int b, int result) {
-        String entry = String.format("%d %s %d = %d", a, operation, b, result);
-        historyModel.insertElementAt(entry, 0);
-        if (historyModel.size() > 10) {
-            historyModel.removeElementAt(10);
+            showError("An unexpected error occurred: " + e.getMessage());
         }
     }
 
@@ -464,21 +461,21 @@ public class ALUInterface extends JFrame {
         if (base.equals("Binary")) {
             return Integer.parseInt(input, 2);
         } else if (base.equals("Hexadecimal")) {
-            return Integer.parseInt(input.replaceFirst("0x", ""), 16);
+            return Integer.parseInt(input, 16);
         }
         return Integer.parseInt(input);
     }
 
-    private void displayResult(int result) {
+    private void displayResult(int calcResult) {
         String base = (String) baseSelector.getSelectedItem();
         if (base.equals("Binary")) {
-            resultField.setText(Integer.toBinaryString(result));
+            resultField.setText(Integer.toBinaryString(calcResult));
         } else if (base.equals("Hexadecimal")) {
-            resultField.setText(String.format("0x%X", result));
+            resultField.setText(String.format("0x%X", calcResult));
         } else {
-            resultField.setText(String.valueOf(result));
+            resultField.setText(String.valueOf(calcResult));
         }
-        binaryResultLabel.setText(String.format("%32s", Integer.toBinaryString(result))
+        binaryResultLabel.setText(String.format("%32s", Integer.toBinaryString(calcResult))
             .replace(' ', '0')
             .replaceAll("(.{8})", "$1 ")
             .trim());
@@ -491,61 +488,17 @@ public class ALUInterface extends JFrame {
 
     private void animateResultField() {
         Color original = resultField.getBackground();
-        Color highlight = lightThemeColor;
+        Color highlight = ModernUIUtils.APP_LIGHT_THEME_COLOR;
+        
+        // Stop any existing animation before starting a new one
+        if (animationTimer != null && animationTimer.isRunning()) {
+            animationTimer.stop();
+            resultField.setBackground(original); // Reset to original if stopped mid-animation
+        }
+        
         resultField.setBackground(highlight);
-        Timer timer = new Timer(400, e -> resultField.setBackground(original));
-        timer.setRepeats(false);
-        timer.start();
-    }
-
-    // Custom components
-    private static class RoundedBorder extends AbstractBorder {
-        private final int radius;
-        private final Color color;
-
-        RoundedBorder(int radius, Color color) {
-            this.radius = radius;
-            this.color = color;
-        }
-
-        @Override
-        public void paintBorder(Component c, Graphics g, int x, int y, int width, int height) {
-            Graphics2D g2 = (Graphics2D) g.create();
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setColor(color);
-            g2.drawRoundRect(x, y, width-1, height-1, radius, radius);
-            g2.dispose();
-        }
-    }
-
-    private static class ModernComboBoxRenderer extends DefaultListCellRenderer {
-        @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value,
-                int index, boolean isSelected, boolean cellHasFocus) {
-            JLabel label = (JLabel) super.getListCellRendererComponent(
-                list, value, index, isSelected, cellHasFocus);
-            label.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-            return label;
-        }
-    }
-
-    private static class HoverEffect extends MouseAdapter {
-        private final JButton button;
-        private final Color originalColor;
-
-        HoverEffect(JButton button) {
-            this.button = button;
-            this.originalColor = button.getBackground();
-        }
-
-        @Override
-        public void mouseEntered(MouseEvent e) {
-            button.setBackground(button.getBackground().brighter());
-        }
-
-        @Override
-        public void mouseExited(MouseEvent e) {
-            button.setBackground(originalColor);
-        }
+        animationTimer = new Timer(RESULT_ANIMATION_DURATION, e -> resultField.setBackground(original));
+        animationTimer.setRepeats(false);
+        animationTimer.start();
     }
 }
